@@ -1,0 +1,110 @@
+\documentclass[aspectratio=169]{beamer}
+
+\usetheme{Madrid}
+\usecolortheme{default}
+\setbeamertemplate{navigation symbols}{}
+
+\title{Reproducing and Extending a Paper on Particle Diameter Prediction}
+\author{Your Name}
+\institute{Your Institute}
+\date{\today}
+
+\newcommand{\imgplaceholder}[2]{
+  \begin{center}
+    \fbox{
+      \begin{minipage}[c][#2][c]{#1}
+        \centering
+        \textbf{Image Placeholder}\\[0.5em]
+        Replace with your figure
+      \end{minipage}
+    }
+  \end{center}
+}
+
+\begin{document}
+
+\begin{frame}
+  \titlepage
+\end{frame}
+
+\begin{frame}{Problem Statement}
+  \begin{itemize}
+    \item Particle diameter is critical in biomedical micro/nano systems.
+    \item Full experimental exploration is costly and time-consuming.
+    \item Goal: predict particle diameter from process parameters using ML.
+  \end{itemize}
+  \vspace{0.3cm}
+  \imgplaceholder{0.75\linewidth}{0.28\textheight}
+\end{frame}
+
+\begin{frame}{Paper Overview}
+  \begin{itemize}
+    \item Target: diameter prediction for chitosan and TiO2-related particles.
+    \item Baseline approach: ANN models (MLP and RBF).
+    \item Inputs: process parameters; Output: particle diameter.
+  \end{itemize}
+  \vspace{0.3cm}
+  \imgplaceholder{0.75\linewidth}{0.28\textheight}
+\end{frame}
+
+\begin{frame}{What I Reproduced}
+  \begin{itemize}
+    \item Rebuilt data workflow and model pipeline from the paper.
+    \item Implemented baseline training and evaluation steps.
+    \item Compared reproduced metrics with paper-reported performance.
+  \end{itemize}
+  \vspace{0.2cm}
+  \begin{block}{Key Message}
+    The original method was implemented as closely as possible.
+  \end{block}
+\end{frame}
+
+\begin{frame}{Reproduction Results}
+  \begin{itemize}
+    \item Baseline results follow the trend reported in the paper.
+    \item Any small gap can come from split randomness and implementation details.
+    \item Reproduction validates the paper's methodology in this environment.
+  \end{itemize}
+  \vspace{0.3cm}
+  \imgplaceholder{0.85\linewidth}{0.30\textheight}
+\end{frame}
+
+\begin{frame}{My Extensions}
+  \begin{itemize}
+    \item Added a new model beyond the original paper.
+    \item Added a new dataset to test broader applicability.
+    \item Added an optimization phase for better tuning.
+  \end{itemize}
+  \vspace{0.3cm}
+  \imgplaceholder{0.85\linewidth}{0.30\textheight}
+\end{frame}
+
+\begin{frame}{Comparison: Baseline vs Extended Pipeline}
+  \begin{itemize}
+    \item \textbf{Paper baseline} $\rightarrow$ reproduced.
+    \item \textbf{+ New model} $\rightarrow$ improved candidate behavior.
+    \item \textbf{+ New dataset} $\rightarrow$ better robustness check.
+    \item \textbf{+ Optimization} $\rightarrow$ stronger final performance.
+  \end{itemize}
+  \vspace{0.3cm}
+  \imgplaceholder{0.85\linewidth}{0.30\textheight}
+\end{frame}
+
+\begin{frame}{Conclusion}
+  \begin{itemize}
+    \item I reproduced the paper's core workflow and results pattern.
+    \item I extended the work with a new model, new dataset, and optimization.
+    \item The pipeline is both reproducible and improvable.
+  \end{itemize}
+  \vspace{0.3cm}
+  \begin{block}{Takeaway}
+    This project validates the original study and shows practical next-step improvements.
+  \end{block}
+\end{frame}
+
+\begin{frame}{Thank You}
+  \centering
+  Questions?
+\end{frame}
+
+\end{document}
