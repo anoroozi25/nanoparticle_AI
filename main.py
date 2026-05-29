@@ -216,3 +216,5 @@ print(results.to_string(index=False, formatters={
     "R²": "{:.4f}".format,
 }))
 results.to_csv("performance_table_tio2.csv", index=False)
+
+print(results)
