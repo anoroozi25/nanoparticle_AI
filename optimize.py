@@ -1,33 +1,41 @@
 """
-Optimize process parameters for small TiO2-doped chitosan nanoparticles.
+Search-based formulation optimizer for nanoparticle diameter.
 
-Usage:
-  python3 optimize.py
-  python3 optimize.py --mixing-rate 500 --chitosan-tpp 1.5 --chitosan-conc 0.5 --tpp-conc 1.0
+Supports:
+1) Minimize size: find formulations with smallest predicted diameter.
+2) Target size: find formulations closest to an arbitrary target nm.
+
+Example:
+  python3 optimize.py --mode minimize --top-n 10
+  python3 optimize.py --mode target --target-nm 220 --top-n 15
+  python3 optimize.py --mode minimize --particle-type-code 1
 """
 
 import argparse
+from itertools import product
 from pathlib import Path
+from typing import Optional
 
-import numpy as np
 import pandas as pd
-from scipy.optimize import differential_evolution
 from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVR
 
-DATA_PATH = Path(__file__).parent / "data.csv"
-TARGET = "Particle Diameter (nm)"
+DATA_PATH = Path(__file__).parent / "data" / "ek_c_kitosan_kitosan_tio2_partikulleri_veri_seti.csv"
+TARGET = "Particle_Diameter_nm"
+RANDOM_STATE = 42
 
 
-def load_data():
-    df = pd.read_csv(DATA_PATH, delimiter="\t")
-    features = [c for c in df.columns if c != TARGET]
-    return df, features
+def load_data() -> pd.DataFrame:
+    df = pd.read_csv(DATA_PATH)
+    df.columns = [c.strip() for c in df.columns]
+    if TARGET not in df.columns:
+        raise ValueError(f"Target column '{TARGET}' not found in {DATA_PATH}.")
+    return df
 
 
-def build_models():
+def build_models() -> dict[str, Pipeline]:
     return {
         "MLP model": Pipeline([
             ("scaler", StandardScaler()),
@@ -36,7 +44,7 @@ def build_models():
                 activation="relu",
                 max_iter=10000,
                 early_stopping=True,
-                random_state=42,
+                random_state=RANDOM_STATE,
             )),
         ]),
         "RBF model": Pipeline([
@@ -46,159 +54,137 @@ def build_models():
     }
 
 
-def train_best_model(df, features):
-    X = df[features]
-    y = df[TARGET]
+def train_model(df: pd.DataFrame, features: list[str], model_name: str):
     models = build_models()
-    for model in models.values():
-        model.fit(X, y)
-    return models["RBF model"], features
+    if model_name not in models:
+        raise ValueError(f"Unknown model '{model_name}'. Choose from: {list(models)}")
+    model = models[model_name]
+    model.fit(df[features], df[TARGET])
+    return model
 
 
-def snap_to_grid(values, features, allowed):
-    snapped = values.copy()
-    for i, name in enumerate(features):
-        choices = np.array(sorted(allowed[name]))
-        snapped[i] = choices[np.argmin(np.abs(choices - snapped[i]))]
-    return snapped
-
-
-def predict_diameter(model, features, params):
+def predict_diameter(model, features: list[str], params: tuple) -> float:
     row = pd.DataFrame([dict(zip(features, params))])
     return float(model.predict(row)[0])
 
 
-def optimize_small_particles(model, features, df):
-    allowed = {col: df[col].unique() for col in features}
-    bounds = [(df[col].min(), df[col].max()) for col in features]
+def search_formulations(
+    model,
+    df: pd.DataFrame,
+    features: list[str],
+    mode: str,
+    target_nm: Optional[float],
+    top_n: int,
+) -> pd.DataFrame:
+    allowed = {f: sorted(df[f].unique()) for f in features}
 
-    def objective(x):
-        x_snapped = snap_to_grid(x, features, allowed)
-        return predict_diameter(model, features, x_snapped)
-
-    result = differential_evolution(
-        objective,
-        bounds,
-        seed=42,
-        maxiter=300,
-        polish=True,
-        tol=1e-6,
-    )
-    best = snap_to_grid(result.x, features, allowed)
-    return best, result.fun
-
-
-def sensitivity(model, features, params, allowed):
-    base = predict_diameter(model, features, params)
     rows = []
-    for i, name in enumerate(features):
-        choices = np.array(sorted(allowed[name]))
-        current = params[i]
-        for direction, label in [(-1, "decrease"), (1, "increase")]:
-            idx = np.where(choices == current)[0]
-            if len(idx) == 0:
-                nearest = choices[np.argmin(np.abs(choices - current))]
-                idx = np.where(choices == nearest)[0]
-            idx = int(idx[0]) + direction
-            if idx < 0 or idx >= len(choices):
-                continue
-            trial = params.copy()
-            trial[i] = choices[idx]
-            pred = predict_diameter(model, features, trial)
-            rows.append({
-                "parameter": name,
-                "change": f"{current} → {trial[i]} ({label})",
-                "predicted_diameter_nm": pred,
-                "delta_nm": pred - base,
-            })
-    return pd.DataFrame(rows).sort_values("predicted_diameter_nm")
+    for combo in product(*(allowed[f] for f in features)):
+        pred = predict_diameter(model, features, combo)
+        if mode == "minimize":
+            score = pred
+            target_error = None
+        else:
+            if target_nm is None:
+                raise ValueError("target_nm is required in target mode.")
+            target_error = abs(pred - target_nm)
+            # tie-break toward smaller particles when equally close
+            score = target_error + 1e-3 * pred
+
+        row = {f: v for f, v in zip(features, combo)}
+        row.update({
+            "predicted_diameter_nm": pred,
+            "target_error_nm": target_error,
+            "score": score,
+        })
+        rows.append(row)
+
+    result = pd.DataFrame(rows).sort_values("score").head(top_n).reset_index(drop=True)
+    result.index = result.index + 1
+    return result
 
 
-def format_params(features, params):
-    return "\n".join(f"  {name}: {params[i]}" for i, name in enumerate(features))
-
-
-def print_recommendations(df, features, current, model):
-    allowed = {col: df[col].unique() for col in features}
-    current = snap_to_grid(np.array(current, dtype=float), features, allowed)
-    current_pred = predict_diameter(model, features, current)
-
-    print("\n--- Your input (snapped to experimental grid) ---")
-    print(format_params(features, current))
-    print(f"  Predicted particle diameter: {current_pred:.2f} nm")
-
-    sens = sensitivity(model, features, current, allowed)
-    print("\n--- One-step changes (RBF model) ---")
-    print(sens.to_string(index=False, formatters={
-        "predicted_diameter_nm": "{:.2f}".format,
-        "delta_nm": "{:+.2f}".format,
-    }))
-
-    best_change = sens.iloc[0]
-    print("\n--- Best single-step move from your settings ---")
-    print(f"  Change {best_change['parameter']}: {best_change['change']}")
-    print(f"  → predicted diameter {best_change['predicted_diameter_nm']:.2f} nm "
-          f"({best_change['delta_nm']:+.2f} nm vs current)")
-
-    best_params, best_pred = optimize_small_particles(model, features, df)
-    print("\n--- Global optimum (within dataset ranges, RBF model) ---")
-    print(format_params(features, best_params))
-    print(f"  Predicted particle diameter: {best_pred:.2f} nm")
-
-    empirical_min = df.loc[df[TARGET].idxmin()]
-    print("\n--- Smallest particles in experimental data ---")
-    for name in features:
-        print(f"  {name}: {empirical_min[name]}")
-    print(f"  Measured diameter: {empirical_min[TARGET]:.2f} nm")
-
-    print("\n--- Guidance for very small nanoparticles ---")
-    print("  1. Lower mixing rate (rpm): strongest trend in data — high rpm → larger particles.")
-    print("     Prefer 250 rpm over 500–750 rpm when possible.")
-    print("  2. Lower chitosan:TPP ratio (v/v): negative correlation with size.")
-    print("     Prefer 1.0 over 1.5–2.0 where formulation allows.")
-    print("  3. Tune TPP and chitosan concentrations together: best measured case used")
-    print("     chitosan 0.5 mg/ml and TPP 0.5 mg/ml at 250 rpm, ratio 1.5.")
-    print("  4. Use the global optimum above as a starting point; validate experimentally")
-    print("     because the model is fit on ~200 points and test R² is moderate.")
-
-
-def parse_args(features):
+def parse_args():
     parser = argparse.ArgumentParser(
-        description="Predict and optimize nanoparticle diameter for arbitrary inputs.",
+        description="Search formulation settings for minimum or target nanoparticle size.",
     )
-    parser.add_argument("--mixing-rate", type=float, help="Mixing rate (rpm)")
-    parser.add_argument("--chitosan-tpp", type=float, help="Chitosan:TPP (v/v)")
-    parser.add_argument("--chitosan-conc", type=float, help="Chitosan concentration (mg/ml)")
-    parser.add_argument("--tpp-conc", type=float, help="TPP concentration (mg/ml)")
+    parser.add_argument(
+        "--mode",
+        choices=["minimize", "target"],
+        default="minimize",
+        help="Optimization mode.",
+    )
+    parser.add_argument(
+        "--target-nm",
+        type=float,
+        default=None,
+        help="Required when --mode target (desired particle diameter in nm).",
+    )
+    parser.add_argument("--top-n", type=int, default=10, help="How many best rows to return.")
+    parser.add_argument(
+        "--particle-type-code",
+        type=int,
+        choices=[0, 1],
+        default=None,
+        help="Optional filter for ek_c dataset: 0=Chitosan, 1=Chitosan/TiO2.",
+    )
+    parser.add_argument(
+        "--model",
+        choices=["RBF model", "MLP model"],
+        default="RBF model",
+        help="Model used to score formulations.",
+    )
     return parser.parse_args()
 
 
 def main():
-    df, features = load_data()
-    model, features = train_best_model(df, features)
-    args = parse_args(features)
+    args = parse_args()
+    df = load_data()
 
-    arg_values = [args.mixing_rate, args.chitosan_tpp, args.chitosan_conc, args.tpp_conc]
+    if args.particle_type_code is not None:
+        if "Particle_Type_Code" not in df.columns:
+            raise ValueError("Particle_Type_Code not present in selected dataset.")
+        df = df[df["Particle_Type_Code"] == args.particle_type_code].copy()
+        if df.empty:
+            raise ValueError("No rows left after Particle_Type_Code filtering.")
 
-    if all(v is None for v in arg_values):
-        allowed = {col: df[col].unique() for col in features}
-        defaults = [
-            df["Mixing rate (rpm)"].median(),
-            df["Chitosan:TPP (v/v)"].median(),
-            df["Chitosan concentration (mg/ml)"].median(),
-            df["TPP Concentration (mg/ml)"].median(),
-        ]
-        current = snap_to_grid(np.array(defaults), features, allowed)
-        print("No inputs provided — using median process settings as example.\n")
-    else:
-        if any(v is None for v in arg_values):
-            raise SystemExit(
-                "Provide all four inputs: --mixing-rate, --chitosan-tpp, "
-                "--chitosan-conc, --tpp-conc"
-            )
-        current = np.array(arg_values)
+    features = [c for c in df.columns if c != TARGET]
+    model = train_model(df, features, args.model)
 
-    print_recommendations(df, features, current, model)
+    if args.mode == "target" and args.target_nm is None:
+        raise SystemExit("For target mode, provide --target-nm (e.g., --target-nm 220).")
+
+    result = search_formulations(
+        model=model,
+        df=df,
+        features=features,
+        mode=args.mode,
+        target_nm=args.target_nm,
+        top_n=args.top_n,
+    )
+
+    print(f"\nDataset: {DATA_PATH.name}")
+    if args.particle_type_code is not None:
+        print(f"Particle_Type_Code filter: {args.particle_type_code}")
+    print(f"Model: {args.model}")
+    print(f"Mode: {args.mode}")
+    if args.mode == "target":
+        print(f"Target: {args.target_nm:.2f} nm")
+
+    print("\nTop recommended formulations:")
+    print(result.to_string(index=True, formatters={
+        "predicted_diameter_nm": "{:.2f}".format,
+        "target_error_nm": (lambda x: "" if pd.isna(x) else f"{x:.2f}"),
+        "score": "{:.4f}".format,
+    }))
+
+    print("\nBest recommendation:")
+    best = result.iloc[0]
+    for f in features:
+        print(f"  {f}: {best[f]}")
+    print(f"  Predicted diameter: {best['predicted_diameter_nm']:.2f} nm")
+    if args.mode == "target":
+        print(f"  Target error: {best['target_error_nm']:.2f} nm")
 
 
 if __name__ == "__main__":
